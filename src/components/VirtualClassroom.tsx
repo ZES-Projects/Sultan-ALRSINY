@@ -12,6 +12,9 @@ import {
   toRichText,
   getDefaultUserPresence,
   createShapeId,
+  createTLStore,
+  Editor,
+  TLParentId,
 } from "@tldraw/tldraw";
 import { pdfToImages } from "../utils/pdf-helpers";
 import "./VirtualClassroom.css";
@@ -57,6 +60,8 @@ interface SessionResponse {
   };
 }
 
+const createAssetId = (id: string) => `asset:${id}`;
+
 const VirtualClassroom: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [pdfFileInputRef] = useState<React.RefObject<HTMLInputElement>>(
@@ -78,10 +83,8 @@ const VirtualClassroom: React.FC = () => {
     video: boolean;
     audio: boolean;
   }>({ video: false, audio: false });
-  // State to track noise cancellation status (LiveKit Cloud Krisp)
   const [noiseCancellationEnabled, setNoiseCancellationEnabled] =
     useState<boolean>(false);
-  // State to track virtual background status
   const [virtualBackgroundEnabled, setVirtualBackgroundEnabled] =
     useState<boolean>(false);
   const [virtualBackgroundManager, setVirtualBackgroundManager] =
@@ -102,18 +105,18 @@ const VirtualClassroom: React.FC = () => {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenShareTrack, setScreenShareTrack] = useState<any>(null);
   const [audioPlaybackReady, setAudioPlaybackReady] = useState(false);
+  const [pageGroups, setPageGroups] = useState<
+    { id: string; y: number; h: number }[]
+  >([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-
-  const editorRef = useRef<any>(null);
+  const editorRef = useRef<Editor | null>(null);
 
   const LIVEKIT_URL = "wss://virtual-classroom-wo4okd0f.livekit.cloud";
   const API_BASE_URL = "https://class.moalimy.com";
 
-  // Get environment-specific configuration
   const config = getTldrawConfig();
 
-  // Set up stable tldraw sync for real-time collaboration with cloud support
   const {
     store: syncStore,
     status: syncStatus,
@@ -133,20 +136,17 @@ const VirtualClassroom: React.FC = () => {
           : "#45B7D1",
     },
     getUserPresence: (store: any, user: any) => {
-      // Get default presence state
       const defaultPresence = getDefaultUserPresence(store, user);
       if (!defaultPresence) return null;
 
       return {
         ...defaultPresence,
-        // Ensure cursor is always included
         cursor: defaultPresence.cursor || {
           x: 0,
           y: 0,
           type: "default",
           rotation: 0,
         },
-        // Add role information to meta
         meta: {
           ...defaultPresence.meta,
           role: role,
@@ -162,7 +162,6 @@ const VirtualClassroom: React.FC = () => {
     retryDelay: config.connection.retryDelay,
   });
 
-  // Timer effect
   useEffect(() => {
     if (isConnected) {
       const interval = setInterval(() => {
@@ -188,7 +187,6 @@ const VirtualClassroom: React.FC = () => {
     };
   }, [room]);
 
-  // Debug remote participants
   useEffect(() => {
     console.log(
       "Remote participants updated:",
@@ -203,7 +201,6 @@ const VirtualClassroom: React.FC = () => {
     );
   }, [remoteParticipants]);
 
-  // Monitor local participant audio state
   useEffect(() => {
     if (room && room.localParticipant) {
       const audioPublications = Array.from(
@@ -222,7 +219,6 @@ const VirtualClassroom: React.FC = () => {
           audioTrack.on("muted", updateLocalAudioState);
           audioTrack.on("unmuted", updateLocalAudioState);
 
-          // Initial state
           updateLocalAudioState();
 
           return () => {
@@ -234,7 +230,6 @@ const VirtualClassroom: React.FC = () => {
     }
   }, [room]);
 
-  // Resolve participant display name from DB based on role, or URL override
   useEffect(() => {
     const resolveName = async () => {
       try {
@@ -271,7 +266,6 @@ const VirtualClassroom: React.FC = () => {
     }
   }, [sessionId, role, nameFromUrl, participantName]);
 
-  // Auto-join room when component mounts
   useEffect(() => {
     if (sessionId && participantName && !isJoining && !isConnected) {
       const autoJoin = async () => {
@@ -283,7 +277,6 @@ const VirtualClassroom: React.FC = () => {
             "LiveKit connection failed, but continuing for PDF testing:",
             error
           );
-          // Set connected to true to allow PDF testing even without LiveKit
           setIsConnected(true);
         }
         setIsJoining(false);
@@ -299,7 +292,6 @@ const VirtualClassroom: React.FC = () => {
       console.log("Participant Name:", participantName);
       console.log("LiveKit URL:", LIVEKIT_URL);
 
-      // Clear any previous error
       setError(null);
 
       const room = new Room({
@@ -308,7 +300,6 @@ const VirtualClassroom: React.FC = () => {
       });
       setRoom(room);
 
-      // Set up event listeners
       room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
       room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
       room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
@@ -333,7 +324,6 @@ const VirtualClassroom: React.FC = () => {
         setAudioPlaybackReady(!!canPlayback);
       });
 
-      // Add connection state change listener
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
         console.log("Connection state changed:", state);
         if (state === "disconnected") {
@@ -346,7 +336,6 @@ const VirtualClassroom: React.FC = () => {
       });
 
       console.log("Getting token from backend...");
-      // Get token from backend
       const token = await getToken(sessionId!, participantName);
       console.log("Token received, length:", token.length);
 
@@ -355,21 +344,18 @@ const VirtualClassroom: React.FC = () => {
       }
 
       console.log("Connecting to LiveKit room...");
-      // Connect to room with timeout
       const connectionPromise = room.connect(LIVEKIT_URL, token, {
         autoSubscribe: true,
       });
 
-      // Add timeout to connection
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Connection timeout")), 30000); // 30 seconds
+        setTimeout(() => reject(new Error("Connection timeout")), 30000);
       });
 
       await Promise.race([connectionPromise, timeoutPromise]);
 
       console.log("Connected to room. Microphone disabled by default.");
 
-      // Try to start audio playback (may require user gesture depending on browser policy)
       try {
         await room.startAudio();
         setAudioPlaybackReady(true);
@@ -381,11 +367,9 @@ const VirtualClassroom: React.FC = () => {
         );
       }
 
-      // Ensure microphone is disabled by default
       setLocalTracks({ video: false, audio: false });
       setNoiseCancellationEnabled(false);
 
-      // Initialize any participants that might already be in the room
       try {
         const existingParticipants = Array.from(
           room.remoteParticipants.values()
@@ -412,7 +396,6 @@ const VirtualClassroom: React.FC = () => {
         console.warn("Failed to initialize existing participants:", initErr);
       }
 
-      // Set local video track
       if (
         videoRef.current &&
         room.localParticipant.videoTrackPublications.size > 0
@@ -436,7 +419,6 @@ const VirtualClassroom: React.FC = () => {
         stack: err instanceof Error ? err.stack : "No stack trace",
       });
 
-      // Clean up room if it exists
       if (room) {
         try {
           room.disconnect();
@@ -446,13 +428,12 @@ const VirtualClassroom: React.FC = () => {
         setRoom(null);
       }
 
-      // Only show error for non-LiveKit related issues
       if (err instanceof Error && err.message.includes("LiveKit")) {
         console.warn(
           "LiveKit connection failed, but continuing for PDF testing:",
           err.message
         );
-        setIsConnected(true); // Allow the app to continue
+        setIsConnected(true);
       } else {
         setError(
           `Failed to join room: ${
@@ -567,7 +548,6 @@ const VirtualClassroom: React.FC = () => {
         (p) => p.participant.identity === participant.identity
       );
       if (existing) {
-        // Update existing participant
         return prev.map((p) => {
           if (p.participant.identity === participant.identity) {
             if (track.kind === Track.Kind.Video) {
@@ -581,7 +561,6 @@ const VirtualClassroom: React.FC = () => {
           return p;
         });
       } else {
-        // Add new participant with track
         console.log(
           "Adding new participant with track:",
           participant.identity,
@@ -626,7 +605,6 @@ const VirtualClassroom: React.FC = () => {
   ) => {
     console.log("Track muted:", publication.kind, participant.identity);
 
-    // Update participant state when track is muted
     setRemoteParticipants((prev) =>
       prev.map((p) => {
         if (p.participant.identity === participant.identity) {
@@ -647,16 +625,13 @@ const VirtualClassroom: React.FC = () => {
   ) => {
     console.log("Track unmuted:", publication.kind, participant.identity);
 
-    // Update participant state when track is unmuted
     setRemoteParticipants((prev) =>
       prev.map((p) => {
         if (p.participant.identity === participant.identity) {
           if (publication.kind === Track.Kind.Audio) {
-            // Find the audio track from the publication
             const audioTrack = publication.track;
             return { ...p, audioTrack: audioTrack || null };
           } else if (publication.kind === Track.Kind.Video) {
-            // Find the video track from the publication
             const videoTrack = publication.track;
             return { ...p, videoTrack: videoTrack || null };
           }
@@ -670,7 +645,6 @@ const VirtualClassroom: React.FC = () => {
     if (!room) return;
 
     if (localTracks.video) {
-      // Detach existing local video from preview before disabling
       try {
         if (
           videoRef.current &&
@@ -683,14 +657,11 @@ const VirtualClassroom: React.FC = () => {
             currentPublication.videoTrack.detach(videoRef.current);
           }
         }
-      } catch (_e) {
-        // ignore detach errors
-      }
+      } catch (_e) {}
 
       await room.localParticipant.setCameraEnabled(false);
       setLocalTracks((prev) => ({ ...prev, video: false }));
 
-      // Disable virtual background when video is disabled
       if (virtualBackgroundManager) {
         await virtualBackgroundManager.disable();
         setVirtualBackgroundEnabled(false);
@@ -699,7 +670,6 @@ const VirtualClassroom: React.FC = () => {
       await room.localParticipant.setCameraEnabled(true);
       setLocalTracks((prev) => ({ ...prev, video: true }));
 
-      // After enabling, attach the newly created local video track to the preview element
       try {
         if (
           videoRef.current &&
@@ -711,9 +681,7 @@ const VirtualClassroom: React.FC = () => {
           if (newPublication.videoTrack) {
             newPublication.videoTrack.attach(videoRef.current);
 
-            // Enable virtual background for all participants by default
             if (!virtualBackgroundManager) {
-              // Wait a bit for the video to be properly attached before applying virtual background
               setTimeout(async () => {
                 if (newPublication.videoTrack) {
                   try {
@@ -735,13 +703,11 @@ const VirtualClassroom: React.FC = () => {
                     );
                   }
                 }
-              }, 500); // Wait 500ms for video to be ready
+              }, 500);
             }
           }
         }
-      } catch (_e) {
-        // ignore attach errors
-      }
+      } catch (_e) {}
     }
   };
 
@@ -755,7 +721,6 @@ const VirtualClassroom: React.FC = () => {
         setNoiseCancellationEnabled(false);
         console.log("Microphone disabled");
       } else {
-        // Ensure audio context is unlocked before enabling mic
         try {
           await room.startAudio();
           setAudioPlaybackReady(true);
@@ -763,7 +728,6 @@ const VirtualClassroom: React.FC = () => {
           setAudioPlaybackReady(false);
         }
 
-        // Enable microphone with noise cancellation
         await room.localParticipant.setMicrophoneEnabled(true, {
           echoCancellation: true,
           noiseSuppression: true,
@@ -780,7 +744,6 @@ const VirtualClassroom: React.FC = () => {
     }
   };
 
-  // Helper function to check if a participant has active audio
   const hasActiveAudio = (participant: RemoteParticipantInfo) => {
     return participant.audioTrack !== null && !participant.audioTrack.isMuted;
   };
@@ -790,12 +753,10 @@ const VirtualClassroom: React.FC = () => {
       console.log("Leaving room...");
 
       if (room) {
-        // Disconnect from LiveKit room
         await room.disconnect();
         console.log("Disconnected from LiveKit room");
       }
 
-      // Reset all states
       setIsConnected(false);
       setRoom(null);
       setRemoteParticipants([]);
@@ -808,11 +769,9 @@ const VirtualClassroom: React.FC = () => {
       setVirtualBackgroundManager(null);
       setError(null);
 
-      // Navigate back to session creation page
       window.location.href = "/admin/create-session";
     } catch (error) {
       console.error("Error leaving room:", error);
-      // Even if there's an error, try to navigate back
       window.location.href = "/admin/create-session";
     }
   };
@@ -822,19 +781,17 @@ const VirtualClassroom: React.FC = () => {
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    // Check if it's a PDF
     if (file.type === "application/pdf") {
       await handlePdfUpload(event);
       return;
     }
 
-    // Frontend validation
     const allowedTypes = [
       "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ];
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    const maxSize = 10 * 1024 * 1024;
 
     if (!allowedTypes.includes(file.type)) {
       setError(
@@ -864,12 +821,9 @@ const VirtualClassroom: React.FC = () => {
       const data: FileUploadResponse = await response.json();
 
       if (data.success && data.filename) {
-        // Automatically convert the file
         await convertFile(data.filename);
       } else {
-        // Handle validation errors and other failures
         if (response.status === 422 && data.details) {
-          // Validation error - show specific details
           const errorMessages = Object.values(data.details).flat();
           setError(`File validation failed: ${errorMessages.join(", ")}`);
         } else if (data.error) {
@@ -908,12 +862,10 @@ const VirtualClassroom: React.FC = () => {
       if (data.success && data.url) {
         setConvertedImages((prev) => [...prev, data.url!]);
 
-        // Automatically add the converted image to the whiteboard after a short delay
         setTimeout(() => {
           addImageToWhiteboard(data.url!, convertedImages.length);
         }, 1000);
       } else {
-        // Handle specific error types
         if (response.status === 400 && data.encrypted) {
           setError(
             "PDF is encrypted and cannot be converted. Please provide an unencrypted PDF file or remove the password protection."
@@ -935,7 +887,6 @@ const VirtualClassroom: React.FC = () => {
   const addImageToWhiteboard = (imageUrl: string, index: number) => {
     if (editorRef.current) {
       try {
-        // Create a frame to contain the image reference
         editorRef.current.createShape({
           type: "frame",
           x: 100 + index * 50,
@@ -947,7 +898,6 @@ const VirtualClassroom: React.FC = () => {
           },
         });
 
-        // Add a text note with the image URL inside the frame
         editorRef.current.createShape({
           type: "note",
           x: 120 + index * 50,
@@ -977,7 +927,6 @@ const VirtualClassroom: React.FC = () => {
 
     try {
       if (isScreenSharing) {
-        // Stop screen sharing
         if (screenShareTrack) {
           await room.localParticipant.unpublishTrack(screenShareTrack);
           setScreenShareTrack(null);
@@ -985,7 +934,6 @@ const VirtualClassroom: React.FC = () => {
         setIsScreenSharing(false);
         console.log("Screen sharing stopped");
       } else {
-        // Start screen sharing
         const screenTracks = await room.localParticipant.createScreenTracks({
           audio: false,
         });
@@ -1004,13 +952,11 @@ const VirtualClassroom: React.FC = () => {
     }
   };
 
-  // Add this function to your component
   const handlePdfUpload = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file || !editorRef.current) return;
 
-      // Validate file type
       if (file.type !== "application/pdf") {
         setError("Please select a PDF file");
         return;
@@ -1020,98 +966,84 @@ const VirtualClassroom: React.FC = () => {
       setError(null);
 
       try {
-        const pageUrls = await pdfToImages(file, 2); // scale 2 for clarity
+        const pageUrls = await pdfToImages(file, 2);
+        let yOffset = 0;
+        const gap = 50;
+        const groups: { id: string; y: number; h: number }[] = [];
 
-        // Preload images to get intrinsic sizes
-        const metas = await Promise.all(
-          pageUrls.map(
-            (url) =>
-              new Promise<{ url: string; width: number; height: number }>(
-                (resolve, reject) => {
-                  const img = new Image();
-                  img.onload = () =>
-                    resolve({
-                      url,
-                      width: img.naturalWidth,
-                      height: img.naturalHeight,
-                    });
-                  img.onerror = (e) => reject(e);
-                  img.src = url;
-                }
-              )
-          )
-        );
+        for (let i = 0; i < pageUrls.length; i++) {
+          const url = pageUrls[i];
+          const img = new Image();
+          img.src = url;
 
-        const maxW = Math.max(...metas.map((m) => m.width));
-        const maxH = Math.max(...metas.map((m) => m.height));
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => {
+              const groupId = createShapeId();
+              const imageId = createShapeId();
+              const assetId = createAssetId(`pdf-${i}`);
 
-        // Create a frame sized to fit all pages with offsets
-        const frameId = createShapeId();
-        const offsetStep = 20;
-        const padding = 40;
-        editorRef.current.createShape({
-          id: frameId,
-          type: "frame",
-          x: 200,
-          y: 150,
-          props: {
-            name: `PDF Document (${pageUrls.length} pages)`,
-            w: maxW + offsetStep * (metas.length - 1) + padding,
-            h: maxH + offsetStep * (metas.length - 1) + padding,
-          },
-        });
-
-        // Add each page as an image shape inside the frame, at full size
-        for (let index = 0; index < metas.length; index++) {
-          try {
-            const { url: pageUrl, width: iw, height: ih } = metas[index];
-            const imageId = createShapeId();
-
-            // Store the image data in the editor's asset system
-            editorRef.current.store.put([
-              {
-                id: `asset:pdf-page-${index}`,
-                typeName: "asset",
-                type: "image",
-                props: {
-                  name: `Page ${index + 1}`,
-                  src: pageUrl,
-                  w: iw,
-                  h: ih,
-                  mimeType: "image/jpeg",
-                  isAnimated: false,
+              editorRef.current?.createAssets([
+                {
+                  id: assetId as any,
+                  type: "image",
+                  typeName: "asset",
+                  props: {
+                    name: `PDF Page ${i + 1}`,
+                    src: url,
+                    w: img.width,
+                    h: img.height,
+                    mimeType: "image/png",
+                    isAnimated: false,
+                  },
+                  meta: {},
                 },
-                meta: {},
-              },
-            ]);
+              ]);
 
-            // Create the image shape with the asset reference at full size
-            editorRef.current.createShape({
-              id: imageId,
-              type: "image",
-              x: 220 + index * offsetStep,
-              y: 170 + index * offsetStep,
-              props: {
-                w: iw,
-                h: ih,
-                assetId: `asset:pdf-page-${index}`,
-              },
-              parentId: frameId,
-            });
-          } catch (error) {
-            console.error(`Error creating image for page ${index + 1}:`, error);
-          }
+              editorRef.current?.createShape({
+                id: groupId,
+                type: "group",
+                x: 0,
+                y: yOffset,
+                isLocked: false,
+              });
+
+              editorRef.current?.createShape({
+                id: imageId,
+                type: "image",
+                parentId: groupId,
+                x: 0,
+                y: 0,
+                props: {
+                  w: img.width,
+                  h: img.height,
+                  assetId: assetId as any,
+                },
+              });
+
+              editorRef.current?.updateShape({
+                id: groupId,
+                type: "group",
+                props: {},
+                meta: {},
+              });
+
+              groups.push({ id: groupId, y: yOffset, h: img.height });
+              yOffset += img.height + gap;
+              resolve();
+            };
+
+            img.onerror = reject;
+          });
         }
 
-        editorRef.current.select(frameId);
-
+        setPageGroups(groups);
+        setConvertedImages((prev) => [...prev, ...pageUrls]);
         console.log("PDF loaded successfully with", pageUrls.length, "pages");
       } catch (err) {
-        console.error("PDF render failed:", err);
-        setError("Failed to render PDF. Please try again.");
+        console.error("PDF load error:", err);
+        setError("Failed to load PDF");
       } finally {
         setIsPdfProcessing(false);
-        // Clear the input
         if (event.target) {
           event.target.value = "";
         }
@@ -1120,8 +1052,33 @@ const VirtualClassroom: React.FC = () => {
     []
   );
 
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    const handleShapeCreate = (shape: any) => {
+      if (shape.type === "group" || shape.type === "image") return;
+
+      const page = pageGroups.find(
+        (p) => shape.y >= p.y && shape.y <= p.y + p.h
+      );
+
+      if (page) {
+        editorRef.current?.updateShape({
+          id: shape.id,
+          type: shape.type,
+          parentId: page.id as TLParentId,
+          isLocked: true,
+        });
+      }
+    };
+
+    editorRef.current.on("create-shape" as any, handleShapeCreate);
+    return () => {
+      editorRef.current?.off("create-shape" as any, handleShapeCreate);
+    };
+  }, [pageGroups]);
+
   if (error) {
-    // Check if this is an encrypted PDF error
     const isEncryptedPdfError =
       error.includes("encrypted") || error.includes("password");
 
@@ -1197,7 +1154,6 @@ const VirtualClassroom: React.FC = () => {
 
   return (
     <div className="virtual-classroom-new">
-      {/* Top Bar */}
       <div className="top-bar">
         <div className="logo-section"></div>
 
@@ -1260,15 +1216,12 @@ const VirtualClassroom: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="main-content">
-        {/* Whiteboard Area */}
         <div className="whiteboard-area">
           <div className="whiteboard-container">
             <CustomTldraw
               store={syncStore}
               autoFocus
-              // inferDarkMode
               onMount={(editor: any) => {
                 editorRef.current = editor;
                 editor.setCurrentTool("select");
@@ -1276,7 +1229,6 @@ const VirtualClassroom: React.FC = () => {
             />
           </div>
 
-          {/* Uploaded Files Display */}
           {convertedImages.length > 0 && (
             <div className="uploaded-files-panel">
               <h4>📁 Uploaded Files</h4>
@@ -1304,7 +1256,6 @@ const VirtualClassroom: React.FC = () => {
             </div>
           )}
 
-          {/* Page Navigation */}
           <div className="page-navigation">
             <button className="page-btn">+</button>
             <div className="page-info">
@@ -1316,11 +1267,8 @@ const VirtualClassroom: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Sidebar */}
         <div className="right-sidebar">
-          {/* Participant Panels */}
           <div className="participant-panels">
-            {/* Local Participant */}
             <div className="participant-panel">
               <div className="participant-video">
                 <video
@@ -1350,7 +1298,6 @@ const VirtualClassroom: React.FC = () => {
               </div>
             </div>
 
-            {/* Remote Participants */}
             {remoteParticipants.map((remoteParticipant) => (
               <div
                 key={remoteParticipant.participant.identity}
@@ -1428,7 +1375,6 @@ const VirtualClassroom: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom Control Bar */}
       <div className="bottom-controls">
         {!audioPlaybackReady && (
           <button
@@ -1528,54 +1474,45 @@ const VirtualClassroom: React.FC = () => {
           <span className="control-label">Whiteboard</span>
         </button>
 
-        <button
-          onClick={toggleScreenShare}
-          className={`control-btn ${isScreenSharing ? "active" : ""}`}
-        >
-          <div className="control-icon-wrapper">
-            <svg
-              className="control-icon"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1.4c0-2 4-3.1 6-3.1s6 1.1 6 3.1V18z" />
-              <path d="M12 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-            </svg>
-          </div>
-          <span className="control-label">Share</span>
-        </button>
+        {role !== "student" && (
+          <button
+            onClick={toggleScreenShare}
+            className={`control-btn ${isScreenSharing ? "active" : ""}`}
+          >
+            <div className="control-icon-wrapper">
+              <svg
+                className="control-icon"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1.4c0-2 4-3.1 6-3.1s6 1.1 6 3.1V18z" />
+                <path d="M12 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+              </svg>
+            </div>
+            <span className="control-label">Share</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => pdfFileInputRef.current?.click()}
-          className={`control-btn ${isPdfProcessing ? "processing" : ""}`}
-          disabled={isPdfProcessing}
-        >
-          <div className="control-icon-wrapper">
-            <svg
-              className="control-icon"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
-            </svg>
-          </div>
-          <span className="control-label">
-            {isPdfProcessing ? "Processing..." : "PDF"}
-          </span>
-        </button>
-
-        {/* <button onClick={handleFileButtonClick} className={`control-btn`}>
-          <div className="control-icon-wrapper">
-            <svg
-              className="control-icon"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
-            </svg>
-          </div>
-          <span className="control-label">File</span>
-        </button> */}
+        {role !== "student" && (
+          <button
+            onClick={() => pdfFileInputRef.current?.click()}
+            className={`control-btn ${isPdfProcessing ? "processing" : ""}`}
+            disabled={isPdfProcessing}
+          >
+            <div className="control-icon-wrapper">
+              <svg
+                className="control-icon"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+              </svg>
+            </div>
+            <span className="control-label">
+              {isPdfProcessing ? "Processing..." : "PDF"}
+            </span>
+          </button>
+        )}
 
         <button
           onClick={() => {
