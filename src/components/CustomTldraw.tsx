@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from "react";
-import { Tldraw, TldrawProps } from "@tldraw/tldraw";
+import { Tldraw, TldrawProps, TLStore } from "@tldraw/tldraw";
 import { RemoteTLStoreWithStatus } from "@tldraw/sync";
 import "tldraw/tldraw.css";
 
+// Updated props interface to handle both TLStore and RemoteTLStoreWithStatus
 interface CustomTldrawProps extends Omit<TldrawProps, "store"> {
   className?: string;
-  store: RemoteTLStoreWithStatus | null;
+  store: TLStore | RemoteTLStoreWithStatus | null;
 }
 
 const CustomTldraw: React.FC<CustomTldrawProps> = ({
@@ -16,10 +17,8 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Remove watermark elements after component mounts
     const removeWatermark = () => {
       if (containerRef.current) {
-        // Remove watermark elements by various selectors
         const watermarkSelectors = [
           '[data-testid="watermark"]',
           '[class*="watermark"]',
@@ -29,10 +28,8 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
           '[class*="MadeWith"]',
           '[class*="tldraw-logo"]',
           '[class*="TldrawLogo"]',
-          // Common watermark patterns
           'div[style*="position: fixed"][style*="bottom"]',
           'div[style*="position: absolute"][style*="bottom"]',
-          // Look for elements containing "tldraw" text
           'div:contains("tldraw")',
           'div:contains("TLDRAW")',
           'div:contains("Made with")',
@@ -50,7 +47,6 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
           }
         });
 
-        // Also look for elements by text content
         const walker = document.createTreeWalker(
           containerRef.current,
           NodeFilter.SHOW_TEXT,
@@ -70,10 +66,7 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
       }
     };
 
-    // Remove watermark immediately
     removeWatermark();
-
-    // Also remove watermark after a short delay to catch dynamically added elements
     const timeoutId = setTimeout(removeWatermark, 100);
     const intervalId = setInterval(removeWatermark, 1000);
 
@@ -100,8 +93,8 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
     );
   }
 
-  // Handle different store states
-  if (store.status === "loading") {
+  // Handle different store states if it's RemoteTLStoreWithStatus
+  if ("status" in store && store.status === "loading") {
     return (
       <div
         className={className}
@@ -117,7 +110,7 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
     );
   }
 
-  if (store.status === "error") {
+  if ("status" in store && store.status === "error") {
     return (
       <div
         className={className}
@@ -148,7 +141,6 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
     >
       <style>
         {`
-          /* Hide watermark elements */
           [data-testid="watermark"],
           [class*="watermark"],
           [class*="Watermark"],
@@ -164,8 +156,6 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
             opacity: 0 !important;
             pointer-events: none !important;
           }
-          
-          /* Hide any element containing tldraw text */
           div:contains("tldraw"),
           div:contains("TLDRAW"),
           div:contains("Made with"),
@@ -174,7 +164,7 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
           }
         `}
       </style>
-      <Tldraw store={store.store} {...props} />
+      <Tldraw store={store} {...props} />
     </div>
   );
 };

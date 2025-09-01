@@ -1,238 +1,204 @@
-import React, { useState, useRef, useCallback } from "react";
-import { createShapeId } from "@tldraw/tldraw";
+import React, { useRef, useState, useEffect } from "react";
+import { createTLStore, Tldraw, Editor, createShapeId } from "@tldraw/tldraw";
+import "@tldraw/tldraw/tldraw.css";
 import { pdfToImages } from "../utils/pdf-helpers";
-import CustomTldraw from "./CustomTldraw";
-import { useStableTldrawSync } from "../utils/stableTldrawSync";
-import { getDefaultUserPresence } from "@tldraw/tldraw";
+import type { TLParentId } from "@tldraw/tldraw";
 
-const PdfTestPage: React.FC = () => {
-  const [isPdfProcessing, setIsPdfProcessing] = useState(false);
+// ✅ helper to fake asset IDs
+const createAssetId = (id: string) => `asset:${id}`;
+
+const PdfEditorPage: React.FC = () => {
+  const editorRef = useRef<Editor | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pdfFileInputRef] = useState<React.RefObject<HTMLInputElement>>(
-    useRef(null)
-  );
-  const editorRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pageGroups, setPageGroups] = useState<
+    { id: string; y: number; h: number }[]
+  >([]);
 
-  // Set up tldraw sync for testing
-  const { store: syncStore } = useStableTldrawSync({
-    roomId: "pdf-test-room",
-    userInfo: {
-      id: "test-user",
-      name: "Test User",
-      color: "#FF6B6B",
-    },
-    getUserPresence: (store: any, user: any) => {
-      const defaultPresence = getDefaultUserPresence(store, user);
-      if (!defaultPresence) return null;
-      return {
-        ...defaultPresence,
-        cursor: defaultPresence.cursor || {
-          x: 0,
-          y: 0,
-          type: "default",
-          rotation: 0,
-        },
-      };
-    },
-  });
+  const store = React.useMemo(() => createTLStore({}), []);
 
-  const handlePdfUpload = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file || !editorRef.current) return;
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      // Validate file type
-      if (file.type !== "application/pdf") {
-        setError("Please select a PDF file");
-        return;
-      }
+    if (file.type !== "application/pdf") {
+      setError("Please upload a PDF file");
+      return;
+    }
 
-      setIsPdfProcessing(true);
-      setError(null);
+    setIsProcessing(true);
+    setError(null);
 
-      try {
-        const pageUrls = await pdfToImages(file, 2); // scale 2 for clarity
+    try {
+      const pageUrls = await pdfToImages(file, 2);
+      if (!editorRef.current) return;
 
-        // Preload images to get intrinsic sizes
-        const metas = await Promise.all(
-          pageUrls.map(
-            (url) =>
-              new Promise<{ url: string; width: number; height: number }>(
-                (resolve, reject) => {
-                  const img = new Image();
-                  img.onload = () =>
-                    resolve({
-                      url,
-                      width: img.naturalWidth,
-                      height: img.naturalHeight,
-                    });
-                  img.onerror = (e) => reject(e);
-                  img.src = url;
-                }
-              )
-          )
-        );
+      let yOffset = 0;
+      const gap = 50;
+      const groups: { id: string; y: number; h: number }[] = [];
 
-        const maxW = Math.max(...metas.map((m) => m.width));
-        const maxH = Math.max(...metas.map((m) => m.height));
+      for (let i = 0; i < pageUrls.length; i++) {
+        const url = pageUrls[i];
+        const img = new Image();
+        img.src = url;
 
-        // Create a frame sized to fit all pages with offsets
-        const frameId = createShapeId();
-        const offsetStep = 20;
-        const padding = 40;
-        editorRef.current.createShape({
-          id: frameId,
-          type: "frame",
-          x: 200,
-          y: 150,
-          props: {
-            name: `PDF Document (${pageUrls.length} pages)`,
-            w: maxW + offsetStep * (metas.length - 1) + padding,
-            h: maxH + offsetStep * (metas.length - 1) + padding,
-          },
-        });
-
-        // Add each page as an image shape inside the frame, at full size
-        for (let index = 0; index < metas.length; index++) {
-          try {
-            const { url: pageUrl, width: iw, height: ih } = metas[index];
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => {
+            const groupId = createShapeId();
             const imageId = createShapeId();
+            const assetId = createAssetId(`pdf-${i}`);
 
-            // Store the image data in the editor's asset system
-            editorRef.current.store.put([
+            editorRef.current?.createAssets([
               {
-                id: `asset:pdf-page-${index}`,
-                typeName: "asset",
+                id: assetId as any,
                 type: "image",
+                typeName: "asset",
                 props: {
-                  name: `Page ${index + 1}`,
-                  src: pageUrl,
-                  w: iw,
-                  h: ih,
-                  mimeType: "image/jpeg",
+                  name: `PDF Page ${i + 1}`,
+                  src: url,
+                  w: img.width,
+                  h: img.height,
+                  mimeType: "image/png",
                   isAnimated: false,
                 },
                 meta: {},
               },
             ]);
 
-            // Create the image shape with the asset reference at full size
-            editorRef.current.createShape({
+            // ✅ Group acts like container (draggable & resizable)
+            editorRef.current?.createShape({
+              id: groupId,
+              type: "group",
+              x: 0,
+              y: yOffset,
+              isLocked: false,
+            });
+
+            // ✅ Image inside group
+            editorRef.current?.createShape({
               id: imageId,
               type: "image",
-              x: 220 + index * offsetStep,
-              y: 170 + index * offsetStep,
+              parentId: groupId,
+              x: 0,
+              y: 0,
               props: {
-                w: iw,
-                h: ih,
-                assetId: `asset:pdf-page-${index}`,
+                w: img.width,
+                h: img.height,
+                assetId: assetId as any,
               },
-              parentId: frameId,
             });
-          } catch (error) {
-            console.error(`Error creating image for page ${index + 1}:`, error);
-          }
-        }
 
-        editorRef.current.select(frameId);
+            editorRef.current?.updateShape({
+              id: groupId,
+              type: "group",
+              props: {},
+              meta: {},
+            });
 
-        console.log("PDF loaded successfully with", pageUrls.length, "pages");
-      } catch (err) {
-        console.error("PDF render failed:", err);
-        setError("Failed to render PDF. Please try again.");
-      } finally {
-        setIsPdfProcessing(false);
-        // Clear the input
-        if (event.target) {
-          event.target.value = "";
-        }
+            groups.push({ id: groupId, y: yOffset, h: img.height });
+            yOffset += img.height + gap;
+            resolve();
+          };
+
+          img.onerror = reject;
+        });
       }
-    },
-    []
-  );
+
+      setPageGroups(groups);
+    } catch (err) {
+      console.error("PDF load error:", err);
+      setError("Failed to load PDF");
+    } finally {
+      setIsProcessing(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+
+  // 👇 Auto-stick annotations into the correct PDF group
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    const handleShapeCreate = (shape: any) => {
+      if (shape.type === "group" || shape.type === "image") return;
+
+      const page = pageGroups.find(
+        (p) => shape.y >= p.y && shape.y <= p.y + p.h
+      );
+
+      if (page) {
+        editorRef.current?.updateShape({
+          id: shape.id,
+          type: shape.type,
+          parentId: page.id as TLParentId,
+          isLocked: true,
+        });
+      }
+    };
+
+    editorRef.current.on("create-shape" as any, handleShapeCreate);
+    return () => {
+      editorRef.current?.off("create-shape" as any, handleShapeCreate);
+    };
+  }, [pageGroups]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Header */}
+      {/* Toolbar */}
       <div
         style={{
-          padding: "20px",
-          backgroundColor: "#f5f5f5",
+          padding: "10px",
+          background: "#f5f5f5",
           borderBottom: "1px solid #ddd",
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
+          gap: "10px",
         }}
       >
-        <h1>PDF Upload Test Page</h1>
         <button
-          onClick={() => pdfFileInputRef.current?.click()}
-          disabled={isPdfProcessing}
-          style={{
-            padding: "10px 20px",
-            backgroundColor: isPdfProcessing ? "#ccc" : "#007bff",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: isPdfProcessing ? "not-allowed" : "pointer",
-            fontSize: "16px",
-          }}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isProcessing}
         >
-          {isPdfProcessing ? "Processing..." : "Upload PDF"}
+          {isProcessing ? "Loading..." : "Upload PDF"}
         </button>
       </div>
 
-      {/* Error Display */}
-      {error && (
+      {error && <div style={{ padding: "10px", color: "red" }}>{error}</div>}
+
+      {/* ✅ Scrollable container for Tldraw */}
+      <div
+        style={{
+          flex: 1,
+          position: "relative",
+          overflow: "auto", // 👈 scrolling enabled
+          background: "#fafafa",
+        }}
+      >
         <div
           style={{
-            padding: "10px",
-            backgroundColor: "#f8d7da",
-            color: "#721c24",
-            border: "1px solid #f5c6cb",
-            margin: "10px",
-            borderRadius: "5px",
+            width: "100%",
+            height: "2000px", // 👈 gives vertical scroll space (auto expands with pages)
+            position: "relative",
           }}
         >
-          {error}
-          <button
-            onClick={() => setError(null)}
-            style={{
-              float: "right",
-              background: "none",
-              border: "none",
-              fontSize: "18px",
-              cursor: "pointer",
+          <Tldraw
+            store={store}
+            onMount={(editor: Editor) => {
+              editorRef.current = editor;
             }}
-          >
-            ×
-          </button>
+          />
         </div>
-      )}
-
-      {/* Whiteboard */}
-      <div style={{ flex: 1, position: "relative" }}>
-        <CustomTldraw
-          store={syncStore}
-          autoFocus
-          inferDarkMode
-          onMount={(editor: any) => {
-            editorRef.current = editor;
-            editor.setCurrentTool("select");
-          }}
-        />
       </div>
 
       {/* Hidden file input */}
       <input
-        ref={pdfFileInputRef}
+        ref={fileInputRef}
         type="file"
         accept="application/pdf"
-        onChange={handlePdfUpload}
         style={{ display: "none" }}
+        onChange={handlePdfUpload}
       />
     </div>
   );
 };
 
-export default PdfTestPage;
+export default PdfEditorPage;
