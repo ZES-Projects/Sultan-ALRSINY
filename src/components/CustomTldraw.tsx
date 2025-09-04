@@ -132,7 +132,7 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
   return (
     <div
       ref={containerRef}
-      className={className}
+      className={`${className || ""} custom-tldraw-container`}
       style={{
         position: "relative",
         width: "100%",
@@ -141,25 +141,25 @@ const CustomTldraw: React.FC<CustomTldrawProps> = ({
     >
       <style>
         {`
-          [data-testid="watermark"],
-          [class*="watermark"],
-          [class*="Watermark"],
-          [class*="tldraw-watermark"],
-          [class*="made-with"],
-          [class*="MadeWith"],
-          [class*="tldraw-logo"],
-          [class*="TldrawLogo"],
-          div[style*="position: fixed"][style*="bottom"],
-          div[style*="position: absolute"][style*="bottom"] {
+          .custom-tldraw-container [data-testid="watermark"],
+          .custom-tldraw-container [class*="watermark"],
+          .custom-tldraw-container [class*="Watermark"],
+          .custom-tldraw-container [class*="tldraw-watermark"],
+          .custom-tldraw-container [class*="made-with"],
+          .custom-tldraw-container [class*="MadeWith"],
+          .custom-tldraw-container [class*="tldraw-logo"],
+          .custom-tldraw-container [class*="TldrawLogo"],
+          .custom-tldraw-container div[style*="position: fixed"][style*="bottom"],
+          .custom-tldraw-container div[style*="position: absolute"][style*="bottom"] {
             display: none !important;
             visibility: hidden !important;
             opacity: 0 !important;
             pointer-events: none !important;
           }
-          div:contains("tldraw"),
-          div:contains("TLDRAW"),
-          div:contains("Made with"),
-          div:contains("MADE WITH") {
+          .custom-tldraw-container div:contains("tldraw"),
+          .custom-tldraw-container div:contains("TLDRAW"),
+          .custom-tldraw-container div:contains("Made with"),
+          .custom-tldraw-container div:contains("MADE WITH") {
             display: none !important;
           }
         `}
