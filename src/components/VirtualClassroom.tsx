@@ -15,6 +15,7 @@ import {
   createTLStore,
   Editor,
   TLParentId,
+  TLShapeId,
 } from "@tldraw/tldraw";
 import { pdfToImages } from "../utils/pdf-helpers";
 import "./VirtualClassroom.css";
@@ -26,6 +27,30 @@ import {
 import CustomTldraw from "./CustomTldraw";
 import { useStableTldrawSync } from "../utils/stableTldrawSync";
 import { getTldrawConfig } from "../config/tldrawConfig";
+import { PDFDocument } from "pdf-lib";
+
+// ---------- Helpers ----------
+const createAssetId = (id: string) => `asset:${id}`;
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+    img.src = src;
+  });
+}
+
+function pagePointToViewport(editor: Editor, x: number, y: number) {
+  const anyEditor = editor as any;
+  if (typeof anyEditor.pageToViewport === "function") {
+    return anyEditor.pageToViewport({ x, y });
+  }
+  if (typeof anyEditor.pageToScreen === "function") {
+    return anyEditor.pageToScreen({ x, y });
+  }
+  return { x, y };
+}
 
 interface FileUploadResponse {
   success: boolean;
@@ -59,8 +84,6 @@ interface SessionResponse {
     student_name: string;
   };
 }
-
-const createAssetId = (id: string) => `asset:${id}`;
 
 const VirtualClassroom: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -106,11 +129,33 @@ const VirtualClassroom: React.FC = () => {
   const [screenShareTrack, setScreenShareTrack] = useState<any>(null);
   const [audioPlaybackReady, setAudioPlaybackReady] = useState(false);
   const [pageGroups, setPageGroups] = useState<
-    { id: string; y: number; h: number }[]
+    { id: TLShapeId; y: number; w: number; h: number; url: string }[]
   >([]);
+  const [session, setSession] = useState<{
+    id: string;
+    subject: string;
+    tutor_name: string;
+    student_name: string;
+  } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [overlayStyle, setOverlayStyle] = useState<React.CSSProperties | null>(
+    null
+  );
+  const [toolbarStyle, setToolbarStyle] = useState<React.CSSProperties | null>(
+    null
+  );
+  const [viewerSize, setViewerSize] = useState<{ w: number; h: number } | null>(
+    null
+  );
+  const [contentHeight, setContentHeight] = useState<number>(0);
+  const [scroll, setScroll] = useState<number>(0);
+  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+  const prevSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const frameIdRef = useRef<TLShapeId | null>(null);
+  const contentGroupIdRef = useRef<TLShapeId | null>(null);
 
   const LIVEKIT_URL = "wss://virtual-classroom-wo4okd0f.livekit.cloud";
   const API_BASE_URL = "https://class.moalimy.com";
@@ -253,6 +298,7 @@ const VirtualClassroom: React.FC = () => {
           `Participant_${Math.floor(Math.random() * 1000)}`;
         const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
         setParticipantName(`${baseName} (${roleLabel})`);
+        setSession(data.session);
       } catch (_e) {
         const baseName =
           nameFromUrl || `Participant_${Math.floor(Math.random() * 1000)}`;
@@ -952,136 +998,415 @@ const VirtualClassroom: React.FC = () => {
     }
   };
 
-  const handlePdfUpload = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file || !editorRef.current) return;
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      if (file.type !== "application/pdf") {
-        setError("Please select a PDF file");
+    if (file.type !== "application/pdf") {
+      setError("Please upload a PDF file");
+      if (e.target) e.target.value = "";
+      return;
+    }
+
+    setIsPdfProcessing(true);
+    setError(null);
+
+    try {
+      const pageUrls = await pdfToImages(file, 2);
+      console.log(
+        "pageUrls from pdfToImages:",
+        pageUrls,
+        "length:",
+        pageUrls.length
+      );
+      if (pageUrls.length === 0) {
+        setError("No pages found in PDF");
         return;
       }
+      const editor = editorRef.current;
+      console.log("Editor in handlePdfUpload:", !!editor);
+      if (!editor) return;
 
-      setIsPdfProcessing(true);
-      setError(null);
-
-      try {
-        const pageUrls = await pdfToImages(file, 2);
-        let yOffset = 0;
-        const gap = 50;
-        const groups: { id: string; y: number; h: number }[] = [];
-
-        for (let i = 0; i < pageUrls.length; i++) {
-          const url = pageUrls[i];
-          const img = new Image();
-          img.src = url;
-
-          await new Promise<void>((resolve, reject) => {
-            img.onload = () => {
-              const groupId = createShapeId();
-              const imageId = createShapeId();
-              const assetId = createAssetId(`pdf-${i}`);
-
-              editorRef.current?.createAssets([
-                {
-                  id: assetId as any,
-                  type: "image",
-                  typeName: "asset",
-                  props: {
-                    name: `PDF Page ${i + 1}`,
-                    src: url,
-                    w: img.width,
-                    h: img.height,
-                    mimeType: "image/png",
-                    isAnimated: false,
-                  },
-                  meta: {},
-                },
-              ]);
-
-              editorRef.current?.createShape({
-                id: groupId,
-                type: "group",
-                x: 0,
-                y: yOffset,
-                isLocked: false,
-              });
-
-              editorRef.current?.createShape({
-                id: imageId,
-                type: "image",
-                parentId: groupId,
-                x: 0,
-                y: 0,
-                props: {
-                  w: img.width,
-                  h: img.height,
-                  assetId: assetId as any,
-                },
-              });
-
-              editorRef.current?.updateShape({
-                id: groupId,
-                type: "group",
-                props: {},
-                meta: {},
-              });
-
-              groups.push({ id: groupId, y: yOffset, h: img.height });
-              yOffset += img.height + gap;
-              resolve();
-            };
-
-            img.onerror = reject;
-          });
-        }
-
-        setPageGroups(groups);
-        setConvertedImages((prev) => [...prev, ...pageUrls]);
-        console.log("PDF loaded successfully with", pageUrls.length, "pages");
-      } catch (err) {
-        console.error("PDF load error:", err);
-        setError("Failed to load PDF");
-      } finally {
-        setIsPdfProcessing(false);
-        if (event.target) {
-          event.target.value = "";
+      if (frameIdRef.current) {
+        try {
+          editor.deleteShapes([frameIdRef.current]);
+        } catch {
+          /* ignore */
         }
       }
-    },
-    []
-  );
+      resetViewer();
 
-  useEffect(() => {
-    if (!editorRef.current) return;
-
-    const handleShapeCreate = (shape: any) => {
-      if (shape.type === "group" || shape.type === "image") return;
-
-      const page = pageGroups.find(
-        (p) => shape.y >= p.y && shape.y <= p.y + p.h
+      const firstImg = await loadImage(pageUrls[0]);
+      const frameW = Math.min(1000, firstImg.width);
+      const frameH = Math.min(
+        720,
+        Math.max(520, Math.floor(firstImg.height * 0.85))
       );
 
-      if (page) {
-        editorRef.current?.updateShape({
-          id: shape.id,
-          type: shape.type,
-          parentId: page.id as TLParentId,
-          isLocked: true,
+      const frameId = createShapeId() as TLShapeId;
+      editor.createShape({
+        id: frameId,
+        type: "frame",
+        x: 80,
+        y: 80,
+        props: { w: frameW, h: frameH, name: "PDF Viewer" },
+      });
+
+      const contentGroupId = createShapeId() as TLShapeId;
+      editor.createShape({
+        id: contentGroupId,
+        type: "group",
+        parentId: frameId as TLParentId,
+        x: 0,
+        y: 0,
+        isLocked: false,
+      });
+
+      frameIdRef.current = frameId;
+      contentGroupIdRef.current = contentGroupId;
+      setViewerSize({ w: frameW, h: frameH });
+      console.log("ViewerSize set:", { w: frameW, h: frameH });
+
+      let yOffset = 0;
+      const gap = 24;
+      const groups: {
+        id: TLShapeId;
+        y: number;
+        w: number;
+        h: number;
+        url: string;
+      }[] = [];
+
+      for (let i = 0; i < pageUrls.length; i++) {
+        const url = pageUrls[i];
+        const img = await loadImage(url);
+
+        const pageW = frameW;
+        const pageH = Math.round((img.height / img.width) * pageW);
+
+        const assetId = createAssetId(`pdf-${i}`);
+        const pageGroupId = createShapeId() as TLShapeId;
+        const imageId = createShapeId() as TLShapeId;
+
+        editor.createAssets([
+          {
+            id: assetId as any,
+            type: "image",
+            typeName: "asset",
+            props: {
+              name: `PDF Page ${i + 1}`,
+              src: url,
+              w: pageW,
+              h: pageH,
+              mimeType: "image/jpeg",
+              isAnimated: false,
+            },
+            meta: {},
+          },
+        ]);
+
+        editor.createShape({
+          id: pageGroupId,
+          type: "group",
+          parentId: contentGroupId as TLParentId,
+          x: 0,
+          y: yOffset,
+          isLocked: false,
         });
+
+        editor.createShape({
+          id: imageId,
+          type: "image",
+          parentId: pageGroupId as TLParentId,
+          x: 0,
+          y: 0,
+          props: {
+            w: pageW,
+            h: pageH,
+            assetId: assetId as any,
+          },
+        });
+
+        groups.push({ id: pageGroupId, y: yOffset, w: pageW, h: pageH, url });
+        yOffset += pageH + gap;
+      }
+      console.log("Groups after loop:", groups, "yOffset:", yOffset);
+      setPageGroups(groups);
+      console.log("PageGroups set:", groups);
+      setContentHeight(Math.max(0, yOffset - gap));
+      console.log(
+        "PageGroups set:",
+        groups,
+        "ContentHeight set:",
+        Math.max(0, yOffset - gap)
+      );
+      console.log("ContentHeight set:", Math.max(0, yOffset - gap));
+      setScroll(0);
+
+      editor.updateShape({
+        id: contentGroupId,
+        type: "group",
+        x: 0,
+        y: 0,
+      });
+
+      requestAnimationFrame(() => updateOverlayFromFrame(true));
+    } catch (err) {
+      console.error("PDF load error:", err); // Already hai, lekin detailed log add kar
+      setError("Failed to load PDF");
+    } finally {
+      setIsPdfProcessing(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+
+  const resetViewer = useCallback(() => {
+    frameIdRef.current = null;
+    contentGroupIdRef.current = null;
+    setPageGroups([]);
+    setContentHeight(0);
+    setViewerSize(null);
+    setScroll(0);
+    setIsMinimized(false);
+    setOverlayStyle(null);
+    setToolbarStyle(null);
+  }, []);
+
+  const setFrameSize = useCallback((w: number, h: number) => {
+    const editor = editorRef.current;
+    const frameId = frameIdRef.current;
+    if (!editor || !frameId) return;
+    const frame = editor.getShape(frameId) as any;
+    if (!frame) return;
+    editor.updateShape({
+      id: frameId,
+      type: "frame",
+      props: {
+        ...(frame.props || {}),
+        w,
+        h,
+        name: frame.props?.name || "PDF Viewer",
+      },
+    });
+    setViewerSize({ w, h });
+  }, []);
+
+  const applyScroll = useCallback(
+    (next: number) => {
+      const editor = editorRef.current;
+      const contentGroupId = contentGroupIdRef.current;
+      if (!editor || !contentGroupId || !viewerSize) return;
+
+      const maxScroll = Math.max(0, contentHeight - viewerSize.h);
+      const clamped = Math.max(0, Math.min(maxScroll, next));
+      setScroll(clamped);
+
+      editor.updateShape({
+        id: contentGroupId,
+        type: "group",
+        x: 0,
+        y: -clamped,
+      });
+    },
+    [contentHeight, viewerSize]
+  );
+
+  const onHtmlScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    applyScroll(el.scrollTop);
+  }, [applyScroll]);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    if (Math.abs(el.scrollTop - scroll) > 1) {
+      el.scrollTop = scroll;
+    }
+  }, [scroll]);
+
+  const updateOverlayFromFrame = useCallback((force = false) => {
+    console.log("updateOverlayFromFrame called, force:", force);
+    const editor = editorRef.current;
+    console.log("Editor available:", !!editor);
+    const frameId = frameIdRef.current;
+    console.log("Frame ID available:", !!frameId);
+    if (!editor || !frameId) {
+      console.log("Editor or frameId not available, resetting overlayStyle");
+      if (overlayStyle) setOverlayStyle(null);
+      if (toolbarStyle) setToolbarStyle(null);
+      return;
+    }
+    const b = editor.getShapePageBounds(frameId);
+    console.log("Bounds:", b);
+    if (!b) {
+      console.log("Bounds not available, resetting overlayStyle");
+      if (overlayStyle) setOverlayStyle(null);
+      return;
+    }
+
+    const tl = pagePointToViewport(editor, b.x, b.y);
+    const br = pagePointToViewport(editor, b.x + b.w, b.y + b.h);
+
+    const left = Math.min(tl.x, br.x);
+    const top = Math.min(tl.y, br.y);
+    const width = Math.abs(br.x - tl.x);
+    const height = Math.abs(br.y - tl.y);
+
+    if (
+      force ||
+      !overlayStyle ||
+      left !== overlayStyle.left ||
+      top !== overlayStyle.top ||
+      width !== overlayStyle.width ||
+      height !== overlayStyle.height
+    ) {
+      setOverlayStyle({
+        position: "absolute",
+        left,
+        top,
+        width,
+        height,
+        pointerEvents: "none",
+        zIndex: 5,
+      });
+      setToolbarStyle({
+        position: "absolute",
+        left,
+        top: top - 70,
+        width,
+        height: 32,
+        display: "flex",
+        alignItems: "center",
+        paddingLeft: 8,
+        gap: 8,
+        pointerEvents: "auto",
+        zIndex: 6,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const dispose =
+      (editor.store as any).listen?.(
+        () => {
+          updateOverlayFromFrame();
+        },
+        { scope: "all" }
+      ) ??
+      (() => {
+        const id = window.setInterval(() => updateOverlayFromFrame(), 200);
+        return () => window.clearInterval(id);
+      });
+
+    updateOverlayFromFrame(true);
+
+    return () => {
+      try {
+        dispose && dispose();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [updateOverlayFromFrame]);
+
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      updateOverlayFromFrame();
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [updateOverlayFromFrame]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const isAnnotation = (type: string) =>
+      type !== "group" && type !== "image" && type !== "frame";
+
+    const stickById = (shapeId: TLShapeId) => {
+      const contentGroupId = contentGroupIdRef.current;
+      const frameId = frameIdRef.current;
+      if (!contentGroupId || !frameId) return;
+
+      const shape = editor.getShape(shapeId) as any;
+      if (!shape || !isAnnotation(shape.type)) return;
+
+      const frameBounds = editor.getShapePageBounds(frameId);
+      const shapeBounds = editor.getShapePageBounds(shapeId);
+      if (!frameBounds || !shapeBounds) return;
+
+      const frameTopWorldY = frameBounds.y;
+      const yMid = shapeBounds.y + shapeBounds.h / 2;
+      const contentSpaceY = yMid - frameTopWorldY + scroll;
+
+      const page = pageGroups.find(
+        (p) => contentSpaceY >= p.y && contentSpaceY <= p.y + p.h
+      );
+      const targetParent = (page?.id ?? contentGroupId) as TLParentId;
+
+      if ((shape as any).parentId !== targetParent) {
+        (editor as any).reparentShapes?.([shapeId], targetParent);
+        editor.updateShape({ id: shapeId, type: shape.type, isLocked: false });
       }
     };
 
-    editorRef.current.on("create-shape" as any, handleShapeCreate);
+    const offAfterCreate =
+      (editor as any).sideEffects?.registerAfterCreateHandler?.(
+        "shape",
+        (record: any) => {
+          if (isAnnotation(record.type)) stickById(record.id as TLShapeId);
+        }
+      ) ?? (() => {});
+
+    const offAfterChange =
+      (editor as any).sideEffects?.registerAfterChangeHandler?.(
+        "shape",
+        (_before: any, after: any) => {
+          if (isAnnotation(after.type)) stickById(after.id as TLShapeId);
+        }
+      ) ?? (() => {});
+
+    const offAfterDelete =
+      (editor as any).sideEffects?.registerAfterDeleteHandler?.(
+        "shape",
+        (record: any) => {
+          const frameId = frameIdRef.current;
+          const contentGroupId = contentGroupIdRef.current;
+          if (record?.id === frameId || record?.id === contentGroupId) {
+            resetViewer();
+          }
+        }
+      ) ?? (() => {});
+
     return () => {
-      editorRef.current?.off("create-shape" as any, handleShapeCreate);
+      try {
+        typeof offAfterCreate === "function" && offAfterCreate();
+        typeof offAfterChange === "function" && offAfterChange();
+        typeof offAfterDelete === "function" && offAfterDelete();
+      } catch {
+        /* ignore */
+      }
     };
-  }, [pageGroups]);
+  }, [pageGroups, scroll, resetViewer]);
 
   if (error) {
     const isEncryptedPdfError =
       error.includes("encrypted") || error.includes("password");
-
+    console.log(
+      "Rendering Check - overlayStyle:",
+      overlayStyle,
+      "viewerSize:",
+      viewerSize,
+      "pageGroups.length:",
+      pageGroups ? pageGroups.length : 0
+    );
     return (
       <div
         className={`error-container ${
@@ -1155,7 +1480,18 @@ const VirtualClassroom: React.FC = () => {
   return (
     <div className="virtual-classroom-new">
       <div className="top-bar">
-        <div className="logo-section"></div>
+        <div className="logo-section">
+          <img
+            src="https://moalimy.com/public/front_assets/images/logo_home_new.png"
+            alt="Logo"
+            style={{
+              height: 65,
+            }}
+          />
+          <div className="subject-name">
+            {session?.subject || "Loading Subject..."}
+          </div>
+        </div>
 
         <div className="session-status">
           {noiseCancellationEnabled && (
@@ -1218,15 +1554,97 @@ const VirtualClassroom: React.FC = () => {
 
       <div className="main-content">
         <div className="whiteboard-area">
-          <div className="whiteboard-container">
+          <div style={{ position: "relative", flex: 1 }}>
             <CustomTldraw
               store={syncStore}
               autoFocus
-              onMount={(editor: any) => {
+              onMount={(editor: Editor) => {
                 editorRef.current = editor;
-                editor.setCurrentTool("select");
+                setTimeout(() => updateOverlayFromFrame(true), 50);
               }}
             />
+            {toolbarStyle && viewerSize && pageGroups.length > 0 && (
+              <div style={toolbarStyle}>
+                <div
+                  style={{
+                    height: 32,
+                    width: "100%",
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "0 8px",
+                  }}
+                >
+                  <button
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 14,
+                      background: "#f4c542",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                    title="Minimize"
+                    onClick={() => {
+                      if (!viewerSize) return;
+                      if (!isMinimized) {
+                        prevSizeRef.current = viewerSize;
+                        setFrameSize(viewerSize.w, 48);
+                        setIsMinimized(true);
+                      } else {
+                        const prev = prevSizeRef.current || { w: 800, h: 600 };
+                        setFrameSize(prev.w, prev.h);
+                        setIsMinimized(false);
+                      }
+                    }}
+                  />
+                  <button
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 14,
+                      background: "#f44336",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                    title="Close"
+                    onClick={() => {
+                      const editor = editorRef.current;
+                      const frameId = frameIdRef.current;
+                      if (!editor || !frameId) return;
+                      try {
+                        editor.deleteShapes([frameId]);
+                      } catch {}
+                      resetViewer();
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {overlayStyle && viewerSize && pageGroups.length > 0 && (
+              <div style={overlayStyle}>
+                <div
+                  ref={scrollerRef}
+                  onScroll={onHtmlScroll}
+                  style={{
+                    pointerEvents: "auto",
+                    position: "absolute",
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 16,
+                    overflowY: "auto",
+                    overflowX: "hidden",
+                    background: "rgba(0, 0, 0, 0.1)", // Visible for debugging
+                    zIndex: 6,
+                  }}
+                >
+                  <div style={{ width: 1, height: contentHeight }} />
+                </div>
+              </div>
+            )}
           </div>
 
           {convertedImages.length > 0 && (

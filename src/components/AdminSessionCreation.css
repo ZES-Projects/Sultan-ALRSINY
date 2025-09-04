@@ -1,13 +1,14 @@
 .admin-session-creation {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: rgb(231, 231, 231);
   padding: 20px;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .container {
+  margin-top: 70px;
   max-width: 800px;
-  margin: 0 auto;
+  /* margin: 0 auto; */
   background: white;
   border-radius: 15px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
@@ -61,7 +62,7 @@ input[type="text"]::placeholder {
 .submit-btn {
   width: 100%;
   padding: 15px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #608f86;
   color: white;
   border: none;
   border-radius: 8px;

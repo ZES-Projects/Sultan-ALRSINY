@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import './AdminSessionCreation.css';
+import React, { useState } from "react";
+import "./AdminSessionCreation.css";
 
 interface SessionData {
   subject: string;
@@ -26,19 +26,21 @@ interface SessionResponse {
 
 const AdminSessionCreation: React.FC = () => {
   const [formData, setFormData] = useState<SessionData>({
-    subject: '',
-    tutor_name: '',
-    student_name: ''
+    subject: "",
+    tutor_name: "",
+    student_name: "",
   });
   const [loading, setLoading] = useState(false);
-  const [sessionResult, setSessionResult] = useState<SessionResponse | null>(null);
+  const [sessionResult, setSessionResult] = useState<SessionResponse | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
   };
 
@@ -49,10 +51,10 @@ const AdminSessionCreation: React.FC = () => {
     setSessionResult(null);
 
     try {
-      const response = await fetch('https://class.moalimy.com/api/sessions', {
-        method: 'POST',
+      const response = await fetch("https://class.moalimy.com/api/sessions", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(formData),
       });
@@ -61,12 +63,12 @@ const AdminSessionCreation: React.FC = () => {
 
       if (response.ok) {
         setSessionResult(data);
-        setFormData({ subject: '', tutor_name: '', student_name: '' });
+        setFormData({ subject: "", tutor_name: "", student_name: "" });
       } else {
-        setError(data.message || 'Failed to create session');
+        setError(data.message || "Failed to create session");
       }
     } catch (err) {
-      setError('Network error occurred');
+      setError("Network error occurred");
     } finally {
       setLoading(false);
     }
@@ -78,9 +80,17 @@ const AdminSessionCreation: React.FC = () => {
 
   return (
     <div className="admin-session-creation">
+      <img
+        src="https://moalimy.com/public/front_assets/images/logo_home_new.png" // Replace with your logo path
+        alt="Logo"
+        style={{
+          height: 65,
+        }}
+      />
+
       <div className="container">
-        <h1>Create Virtual Classroom Session</h1>
-        
+        <h1 style={{ color: "#608f86" }}>Create Virtual Classroom Session</h1>
+
         <form onSubmit={handleSubmit} className="session-form">
           <div className="form-group">
             <label htmlFor="subject">Class Subject</label>
@@ -122,38 +132,42 @@ const AdminSessionCreation: React.FC = () => {
           </div>
 
           <button type="submit" disabled={loading} className="submit-btn">
-            {loading ? 'Creating Session...' : 'Create Session'}
+            {loading ? "Creating Session..." : "Create Session"}
           </button>
         </form>
 
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-message">{error}</div>}
 
         {sessionResult && (
           <div className="session-result">
             <h2>Session Created Successfully!</h2>
             <div className="session-info">
-              <p><strong>Subject:</strong> {sessionResult.session.subject}</p>
-              <p><strong>Tutor:</strong> {sessionResult.session.tutor_name}</p>
-              <p><strong>Student:</strong> {sessionResult.session.student_name}</p>
-              <p><strong>Session ID:</strong> {sessionResult.session.id}</p>
+              <p>
+                <strong>Subject:</strong> {sessionResult.session.subject}
+              </p>
+              <p>
+                <strong>Tutor:</strong> {sessionResult.session.tutor_name}
+              </p>
+              <p>
+                <strong>Student:</strong> {sessionResult.session.student_name}
+              </p>
+              <p>
+                <strong>Session ID:</strong> {sessionResult.session.id}
+              </p>
             </div>
 
             <div className="role-urls">
               <h3>Role-based URLs:</h3>
-              
+
               <div className="url-item">
                 <label>Tutor URL:</label>
                 <div className="url-display">
-                  <input 
-                    type="text" 
-                    value={sessionResult.urls.tutor} 
-                    readOnly 
+                  <input
+                    type="text"
+                    value={sessionResult.urls.tutor}
+                    readOnly
                   />
-                  <button 
+                  <button
                     onClick={() => copyToClipboard(sessionResult.urls.tutor)}
                     className="copy-btn"
                   >
@@ -165,12 +179,12 @@ const AdminSessionCreation: React.FC = () => {
               <div className="url-item">
                 <label>Student URL:</label>
                 <div className="url-display">
-                  <input 
-                    type="text" 
-                    value={sessionResult.urls.student} 
-                    readOnly 
+                  <input
+                    type="text"
+                    value={sessionResult.urls.student}
+                    readOnly
                   />
-                  <button 
+                  <button
                     onClick={() => copyToClipboard(sessionResult.urls.student)}
                     className="copy-btn"
                   >
@@ -182,13 +196,15 @@ const AdminSessionCreation: React.FC = () => {
               <div className="url-item">
                 <label>Moderator URL:</label>
                 <div className="url-display">
-                  <input 
-                    type="text" 
-                    value={sessionResult.urls.moderator} 
-                    readOnly 
+                  <input
+                    type="text"
+                    value={sessionResult.urls.moderator}
+                    readOnly
                   />
-                  <button 
-                    onClick={() => copyToClipboard(sessionResult.urls.moderator)}
+                  <button
+                    onClick={() =>
+                      copyToClipboard(sessionResult.urls.moderator)
+                    }
                     className="copy-btn"
                   >
                     Copy

@@ -459,19 +459,29 @@
 .control-btn:hover .control-icon-wrapper {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   transform: scale(1.05);
+  background: #608f86;
 }
 
 .control-btn.active .control-icon-wrapper {
   background: white;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
-
+.control-btn.active:hover .control-icon-wrapper {
+  background: #608f86;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
 .control-btn.muted .control-icon-wrapper {
   background: white;
+}
+.control-btn.muted:hover .control-icon-wrapper {
+  background: #608f86;
 }
 
 .control-btn.exit-btn .control-icon-wrapper {
   background: white;
+}
+.control-btn.exit-btn:hover .control-icon-wrapper {
+  background: #608f86;
 }
 
 .control-btn.exit-btn .control-icon {
@@ -1578,4 +1588,31 @@
 .reconnect-btn:hover {
   background: rgba(255, 255, 255, 0.2);
   transform: scale(1.1);
+}
+.virtual-classroom-new .top-bar {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background-color: #fff; /* Apne UI theme ke mutabiq change kar sakte ho */
+}
+
+.virtual-classroom-new .logo-section {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+}
+
+.virtual-classroom-new .subject-name {
+  font-size: 25px;
+  font-weight: bold;
+  color: #000000; /* AdminSessionCreation se match */
+  margin-left: 70px; /* Logo ke baad thoda space */
+  margin-right: 10px; /* Right side pe thoda shift ke liye */
+  white-space: nowrap; /* Text wrap na ho */
+}
+
+.virtual-classroom-new .session-status {
+  display: flex;
+  align-items: center;
+  gap: 15px;
 }
